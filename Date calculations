@@ -1,0 +1,77 @@
+>>>#判断平年还是闰年 
+def days_year(year):
+    if year % 4 != 0 or (year % 100 == 0 and year % 400 != 0):
+        return 365
+    else:
+        return 366
+>>> # 计算date的前一天，输入输出为int
+def day_before(date):
+    date = int(date)
+    year = int(date / 10000)
+    set1 = {2, 4, 6, 8, 9, 11}
+    set2 = {5, 7, 10, 12}
+    if date % 100 > 1:
+        date1 = date - 1
+    elif int((date % 10000)/100) in set1:
+        date1 = date - 101 + 31
+    elif int((date % 10000)/100) in set2:
+        date1 = date - 101 + 30
+    elif int((date % 10000)/100) == 1:
+        date1 = date - 10101 + 1231
+    elif days_year(year) == 365:
+        date1 = date - 101 + 28
+    else:
+        date1 = date - 101 + 29
+    return date1
+>>> # 计算date的后一天，输入输出均为int
+def day_next(date):
+    date = int(date)
+    day = date % 100
+    month = int((date % 10000)/100)
+    year = int(date / 10000)
+    set1 = {1, 3, 5, 7, 8, 10}
+    set2 = {4, 6, 9, 11}
+    if date % 10000 == 229:
+        date1 = date - 229 + 301
+    elif date % 10000 == 228 and days_year(year) == 365:
+        date1 = date - 228 + 301
+    elif day == 31 and month in set1:
+        date1 = date - 31 + 101
+    elif day == 30 and month in set2:
+        date1 = date - 30 + 101
+    elif day == 31 and month == 12:
+        date1 = date - 1231 + 10101
+    else:
+        date1 = date + 1
+    return date1
+# 计算从年初到当前日期date的天数,包含当天
+def days_gone_this_year(date):
+    days_usual = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+    year = int(date/10000)
+    month = int((date % 10000)/100)
+    day = date % 100
+    number_of_days = 0
+    for i in range(1, month):
+        number_of_days += days_usual[i]
+    number_of_days += day
+    # 如果是闰年
+    if (year % 400 == 0 or (year % 4 == 0 and year % 100 != 0)) and month >= 3:
+        number_of_days += 1
+    return number_of_days
+
+# 计算当年剩余天数，不包含当天
+def days_left(date):
+    year = int(date/10000)
+    return days_year(year) - days_gone_this_year(date)
+    
+# 计算两个日期的时间间隔
+def days_between(date1, date2):
+    day = 0
+    year1 = int(date1/10000)
+    year2 = int(date2/10000)
+    if date1 < date2:
+        for i in range(year1, year2):
+            day += days_year(i)
+        day += days_gone_this_year(date2) - days_gone_this_year(date1)
+    return day
+    
