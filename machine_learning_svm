@@ -1,0 +1,203 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Wed Jul  6 09:27:54 2016
+
+@author: larry
+"""
+import pandas as pd 
+import numpy as np
+import copy
+import statsmodels.api as sm
+from patsy import dmatrices, dmatrix, demo_data
+from sklearn import preprocessing
+import  sklearn.svm as svm
+import matplotlib.pylab as plt
+from sklearn.grid_search import GridSearchCV
+from scipy.stats import randint as sp_randint
+
+
+
+def cal_mlfactor(fund_info,hsret):
+#   指标计算： 简单收益率，夏普，最大回测，波动率，下行波动率，beta值，
+    averet=[]
+    sigma=[]
+    sharpratio=[]
+    maxdown=[]
+    downsigma=[]
+    beta=[]
+    
+    
+    
+    retlist=copy.deepcopy(fund_info.iloc[1:])
+    for i in range(len(retlist)):
+        retlist.iloc[i]=(fund_info.iloc[i+1]-fund_info.iloc[i])/fund_info.iloc[i]
+    
+    
+    downlist=copy.deepcopy(retlist)
+    for i in range(len(downlist)):
+        for j in range(len(downlist.columns)):
+            downlist.iloc[i,j]=1-fund_info.iloc[i+1,j]/max(fund_info.iloc[:i+2,j])
+       
+        
+    for i in range(len(retlist.columns)):
+        averet.append(retlist.iloc[:,i].mean())
+        sigma.append(retlist.iloc[:,i].std())
+        sharpratio.append(((retlist.iloc[:,i].mean()*240)-0.03)/(retlist.iloc[:,i].std()*(240**0.5)))
+        maxdown.append(max(downlist.iloc[:,i]))
+        downsigma.append(pd.Series([x for x in list(retlist.iloc[:,i]) if x < 0]).std())
+        
+        y=hsret
+        x=retlist.iloc[:,i]
+        Y,X=dmatrices('y~x',return_type='dataframe')
+        mod=sm.OLS(Y,X)
+        res=mod.fit()
+        beta.append(res.params[1])
+    result=pd.DataFrame(index=retlist.columns,columns=['averet','sigma','sharpratio','maxdown','downsigma','beta'])
+    result['averet']=preprocessing.scale(averet)
+    result['sigma']=preprocessing.scale(sigma)
+    result['sharpratio']=preprocessing.scale(sharpratio)
+    result['maxdown']=preprocessing.scale(maxdown)
+    result['downsigma']=preprocessing.scale(downsigma)
+    result['beta']=preprocessing.scale(beta)
+    for i in range(len(result)):
+        for j in range(len(result.columns)):
+            if abs(result.iloc[i,j])>=3:
+                result.iloc[i,j]=np.NaN
+    result.dropna(inplace=True)            
+    return result
+
+
+def normxy_svm(xresult,yresult): 
+    yresult=pd.DataFrame((yresult.iloc[-1]-yresult.iloc[1])/ yresult.iloc[1]).rank(0,ascending=False)
+    for i in range(len(yresult)):
+        if yresult.iloc[i,0]<=int(len(xresult)*0.2):
+            yresult.iloc[i,0]=1
+        elif yresult.iloc[i,0]>=int(len(xresult)*0.8):
+            yresult.iloc[i,0]=-1
+        else :
+            yresult.iloc[i,0]=0
+            
+    for i in range(len(yresult)):
+        if yresult.iloc[i,0]==0:
+            yresult.iloc[i,0]=np.NaN
+            xresult.iloc[i]=np.NaN
+    xresult=np.array(xresult.dropna())         
+    yresult=np.array(list(yresult.dropna()[0]))
+    return xresult,yresult
+
+
+
+ 
+
+
+total_nav=pd.read_excel(r'C:\Users\larry\Desktop\lundong\machine learning.xlsx')
+hs300=pd.read_excel(r'C:\Users\larry\Desktop\lundong\machine learning.xlsx',sheetname='HS300')
+backdata=60
+
+score=[]
+badscore=[]
+meanrank=[]
+for h in range(240,1000,20):
+    fund_info=total_nav.iloc[h-backdata-20:h-20]
+    fund_info.dropna(inplace=True,axis=1)
+    fund_info=fund_info/fund_info.iloc[0]
+    hs=hs300.iloc[h-backdata-20:h-20]
+    hs=hs/hs.iloc[0]   
+    hsret=copy.deepcopy(hs.iloc[1:])
+    for i in range(len(hsret)):
+        hsret.iloc[i]=(hs.iloc[i+1]-hs.iloc[i])/hs.iloc[i]
+    xresult=cal_mlfactor(fund_info,hsret) 
+    yresult=total_nav.ix[h-20:h,list(xresult.index)]
+    x,y=normxy_svm(xresult,yresult)
+    clf=svm.SVC()
+    tuned_parameters = [{'kernel': ['rbf'], 'gamma': [1e-3, 5e-4,1e-4],
+                     'C': [1, 5,10,50, 100,500, 1000]}]    
+    clf = GridSearchCV(svm.SVC(), tuned_parameters, cv=5)     
+    clf.fit(x,y)
+    print(clf.best_params_)
+    fund_info=total_nav.iloc[h-backdata:h]
+    fund_info.dropna(inplace=True,axis=1)
+    fund_info=fund_info/fund_info.iloc[0]
+    hs=hs300.iloc[h-backdata:h]
+    hs=hs/hs.iloc[0]   
+    hsret=copy.deepcopy(hs.iloc[1:])
+    for i in range(len(hsret)):
+        hsret.iloc[i]=(hs.iloc[i+1]-hs.iloc[i])/hs.iloc[i]    
+    xpredict=cal_mlfactor(fund_info,hsret) 
+#    ypredict=clf.predict(np.array(xpredict))
+    ytrue=total_nav.ix[h:h+20,list(xpredict.index)]
+    ytrue=pd.DataFrame((ytrue.iloc[-1]-ytrue.iloc[1])/ ytrue.iloc[1]).rank(0,ascending=False)
+    svmselect=list(pd.DataFrame(clf.decision_function(xpredict)).rank().sort_values(by=0).tail(10).index)
+    svmselect=list(xpredict.index[svmselect])
+    ranktrue=[]
+    for i in svmselect:
+        ranktrue.append(list(ytrue.index).index(i))
+    meanrank.append(sum(ranktrue)/len(ranktrue))    
+    num=0
+    ber=0
+    for i in ranktrue:
+        if i<=int(len(xpredict)*0.2):
+            num+=1
+        elif i>=int(len(xpredict)*0.8):
+            ber+=1
+    score.append(num/len(ranktrue))
+    badscore.append(ber/len(ranktrue))
+    print(h)
+    
+    
+    
+    
+    plt.plot(score)
+    plt.hist(score)
+    pd.DataFrame(score).describe()
+    
+    plt.plot(badscore)
+    plt.hist(badscore)
+    pd.DataFrame(badscore).describe()
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
